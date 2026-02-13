@@ -1,0 +1,40 @@
+# TruthRL Environment Snapshot
+timestamp_utc: 2026-02-11T01:33:35Z
+repo_root: /home/erichyu/projects/def-zshakeri/erichyu/embc/TruthRL
+apptainer_image: /home/erichyu/projects/def-zshakeri/erichyu/envs/truthrl_apptainer/truthrl.sif
+git_branch: embc_clinical_truthrl_v1
+git_commit: 86d7be167cd37478e3973437f63afe88e79f4b88
+
+## Host
+hostname: g30.nibi.sharcnet
+kernel: Linux 5.14.0-570.44.1.el9_6.x86_64 x86_64 GNU/Linux
+
+## Tooling
+python3: Python 3.11.4
+pip: pip 21.3.1 from /usr/lib/python3.9/site-packages/pip (python 3.9)
+apptainer: apptainer version 1.3.5
+
+## NVIDIA
+Field "cuda_version" is not a valid field to query.
+
+nvidia-smi present but GPU info unavailable
+
+## Python Packages (top-level hints)
+torch: unavailable (ModuleNotFoundError)
+vllm: unavailable (ModuleNotFoundError)
+ray: unavailable (ModuleNotFoundError)
+transformers: unavailable (ModuleNotFoundError)
+flash_attn: unavailable (ModuleNotFoundError)
+
+## Container (cleanenv)
+python: 3.12.10
+platform: Linux-5.14.0-570.44.1.el9_6.x86_64-x86_64-with-glibc2.35
+verl: 0.5.0.dev
+torch: 2.6.0+cu124
+INFO 02-10 20:33:44 [importing.py:53] Triton module has been replaced with a placeholder.
+INFO 02-10 20:33:47 [__init__.py:243] No platform detected, vLLM is running on UnspecifiedPlatform
+vllm: 0.8.5.post1
+ray: 2.45.0
+transformers: 4.51.3
+flash_attn: 2.7.4.post1
+cuda_driver_info: unavailable
