@@ -58,6 +58,15 @@ echo "[INFO] PYTHONPATH=${PYTHONPATH_IN_CONTAINER}"
 echo "[INFO] APPTAINER_CACHEDIR=${APPTAINER_CACHEDIR}"
 echo "[INFO] APPTAINER_TMPDIR=${APPTAINER_TMPDIR}"
 
+if [[ "${CHECK_STAGEB_DATA:-0}" == "1" ]]; then
+  STAGEB_FILE="${STAGEB_GRPO_TRAIN_FILE:-${REPO_ROOT}/data/medical/verl/medqa_grpo_train.parquet}"
+  if [[ ! -f "${STAGEB_FILE}" ]]; then
+    echo "[ERROR] Stage B GRPO parquet not found: ${STAGEB_FILE}" >&2
+    exit 1
+  fi
+  echo "[INFO] Stage B GRPO parquet exists: ${STAGEB_FILE}"
+fi
+
 apptainer exec "${NV_FLAG[@]}" --cleanenv \
   --env "PYTHONPATH=${PYTHONPATH_IN_CONTAINER}" \
   "${IMAGE_PATH}" \
