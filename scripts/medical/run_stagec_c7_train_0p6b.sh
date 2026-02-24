@@ -22,6 +22,8 @@ NPROC_PER_NODE="${NPROC_PER_NODE:-1}"
 NNODES="${NNODES:-1}"
 PROJECT_NAME="${PROJECT_NAME:-stagec-c7-full}"
 EXPERIMENT_NAME="${EXPERIMENT_NAME:-qwen3-0p6b}"
+RESUME_MODE="${RESUME_MODE:-disable}"
+RESUME_FROM_PATH="${RESUME_FROM_PATH:-}"
 
 mkdir -p "${SFT_CKPT_DIR}" "${REPORT_DIR}"
 
@@ -83,6 +85,10 @@ echo "[INFO] TRAIN_PARQUET=${TRAIN_PARQUET}"
 echo "[INFO] VAL_PARQUET=${VAL_PARQUET}"
 echo "[INFO] SFT_CKPT_DIR=${SFT_CKPT_DIR}"
 echo "[INFO] NPROC_PER_NODE=${NPROC_PER_NODE} NNODES=${NNODES}"
+echo "[INFO] RESUME_MODE=${RESUME_MODE}"
+if [[ -n "${RESUME_FROM_PATH}" ]]; then
+  echo "[INFO] RESUME_FROM_PATH=${RESUME_FROM_PATH}"
+fi
 
 "${PY_CMD[@]}" - <<PY
 import os
@@ -124,6 +130,11 @@ PY
   rm -f "${ddp_check_script}"
 fi
 
+RESUME_ARGS=(trainer.resume_mode="${RESUME_MODE}")
+if [[ -n "${RESUME_FROM_PATH}" ]]; then
+  RESUME_ARGS+=(trainer.resume_from_path="${RESUME_FROM_PATH}")
+fi
+
 "${PY_CMD[@]}" -m torch.distributed.run --standalone --nnodes="${NNODES}" --nproc_per_node="${NPROC_PER_NODE}" \
   -m verl.trainer.fsdp_sft_trainer \
   data.train_files="${TRAIN_PARQUET}" \
@@ -152,7 +163,7 @@ fi
   trainer.test_freq=-1 \
   trainer.n_gpus_per_node="${NPROC_PER_NODE}" \
   trainer.nnodes="${NNODES}" \
-  trainer.resume_mode=disable
+  "${RESUME_ARGS[@]}"
 
 latest_ckpt="$(ls -d "${SFT_CKPT_DIR}"/global_step_* 2>/dev/null | sort -V | tail -n 1 || true)"
 if [[ -z "${latest_ckpt}" ]]; then
