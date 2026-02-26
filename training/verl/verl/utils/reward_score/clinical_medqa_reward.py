@@ -9,6 +9,7 @@ from typing import Any
 
 _BOXED_PATTERN = re.compile(r"\\boxed\s*{(.*?)}", re.DOTALL)
 _OPTION_LABEL_PATTERN = re.compile(r"^\s*([A-Za-z])\s*[:.)\]-]?\s*")
+_THINK_ANSWER_PATTERN = re.compile(r"<think>(.*?)</think>\s*<answer>(.*?)</answer>", re.DOTALL | re.IGNORECASE)
 
 
 def extract_single_boxed(solution_str: str) -> tuple[bool, str | None]:
@@ -139,6 +140,59 @@ def compute_outcome_score(
     }
 
 
+def compute_format_reward(solution_str: str) -> float:
+    """
+    Reward format contract:
+    - +1.0 if <think>...</think><answer>...</answer> exists in order.
+    - +0.5 if answer section includes explanatory text plus one boxed answer.
+    """
+    if not isinstance(solution_str, str):
+        return 0.0
+
+    match = _THINK_ANSWER_PATTERN.search(solution_str.strip())
+    if not match:
+        return 0.0
+
+    score = 1.0
+    answer_section = match.group(2).strip()
+    valid_boxed, _ = extract_single_boxed(answer_section)
+    if valid_boxed:
+        boxed_only = _BOXED_PATTERN.sub("", answer_section).strip()
+        if boxed_only:
+            score += 0.5
+    return score
+
+
+def compute_consistency_reward(solution_str: str, ground_truth: dict[str, Any]) -> float:
+    """
+    Reward consistency between answer narrative and boxed answer.
+    Returns 0.0 or 1.0.
+    """
+    valid_boxed, boxed_content = extract_single_boxed(solution_str)
+    if not valid_boxed or boxed_content is None:
+        return 0.0
+
+    if is_abstain_boxed(boxed_content):
+        lower = solution_str.lower()
+        return 1.0 if ("don't know" in lower or "dont know" in lower or "do not know" in lower) else 0.0
+
+    boxed_choice = normalize_choice(boxed_content)
+    if not boxed_choice:
+        return 0.0
+
+    match = _THINK_ANSWER_PATTERN.search(solution_str.strip())
+    answer_section = match.group(2) if match else solution_str
+    extracted = re.findall(r"\b([A-Z])\b", answer_section.upper())
+
+    choice_set = _extract_choice_set(ground_truth)
+    mentions = [x for x in extracted if not choice_set or x in choice_set]
+    unique_mentions = sorted(set(mentions))
+
+    if len(unique_mentions) == 1 and unique_mentions[0] == boxed_choice:
+        return 1.0
+    return 0.0
+
+
 def compute_score(
     data_source: str,
     solution_str: str,
@@ -149,17 +203,34 @@ def compute_score(
     """NaiveRewardManager-compatible reward entry for Stage D."""
     del data_source, extra_info  # kept for signature compatibility
 
+    stage_mode = str(kwargs.get("stage_mode", "d1")).strip().lower()
     k = float(kwargs.get("k", 1.0))
     plain_ternary = bool(kwargs.get("plain_ternary", True))
+    enable_format = bool(kwargs.get("enable_format", stage_mode == "d2"))
+    enable_consistency = bool(kwargs.get("enable_consistency", stage_mode == "d2"))
+    lambda_format = float(kwargs.get("lambda_format", 1.0))
+    lambda_consistency = float(kwargs.get("lambda_consistency", 0.5))
 
     outcome = compute_outcome_score(solution_str=solution_str, ground_truth=ground_truth, plain_ternary=plain_ternary)
-    final_score = k * float(outcome["outcome_score"])
+    format_score = compute_format_reward(solution_str) if enable_format else 0.0
+    consistency_score = compute_consistency_reward(solution_str, ground_truth) if enable_consistency else 0.0
+
+    final_score = (
+        k * float(outcome["outcome_score"])
+        + lambda_format * float(format_score)
+        + lambda_consistency * float(consistency_score)
+    )
 
     return {
         "score": float(final_score),
         "outcome_score": float(outcome["outcome_score"]),
+        "format_score": float(format_score),
+        "consistency_score": float(consistency_score),
         "is_abstain": int(outcome["is_abstain"]),
         "is_boxed_valid": int(outcome["is_boxed_valid"]),
         "prediction_type": outcome["prediction_type"],
+        "stage_mode": stage_mode,
         "k": k,
+        "lambda_format": lambda_format,
+        "lambda_consistency": lambda_consistency,
     }

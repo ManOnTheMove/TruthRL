@@ -1,6 +1,8 @@
 # Copyright 2026
 
 from verl.utils.reward_score.clinical_medqa_reward import (
+    compute_consistency_reward,
+    compute_format_reward,
     compute_outcome_score,
     compute_score,
     extract_single_boxed,
@@ -148,3 +150,42 @@ def test_compute_outcome_score_knowledge_enhanced_for_ook():
     )
     assert abstain["outcome_score"] == 1.0
     assert answer["outcome_score"] == -1.0
+
+
+def test_compute_format_reward_good_structure():
+    s = "<think>reasoning</think><answer>Therefore A is best. \\boxed{A}</answer>"
+    assert compute_format_reward(s) == 1.5
+
+
+def test_compute_format_reward_missing_tags():
+    s = "Therefore \\boxed{A}"
+    assert compute_format_reward(s) == 0.0
+
+
+def test_compute_consistency_reward_match():
+    s = "<think>r</think><answer>The correct option is A. \\boxed{A}</answer>"
+    assert compute_consistency_reward(s, _gt("A")) == 1.0
+
+
+def test_compute_consistency_reward_conflict():
+    s = "<think>r</think><answer>The correct option is B. \\boxed{A}</answer>"
+    assert compute_consistency_reward(s, _gt("A")) == 0.0
+
+
+def test_compute_score_d2_combined():
+    s = "<think>r</think><answer>The correct option is A. \\boxed{A}</answer>"
+    res = compute_score(
+        data_source="medqa",
+        solution_str=s,
+        ground_truth=_gt("A"),
+        stage_mode="d2",
+        enable_format=True,
+        enable_consistency=True,
+        k=1,
+        lambda_format=1.0,
+        lambda_consistency=0.5,
+    )
+    assert res["outcome_score"] == 1.0
+    assert res["format_score"] == 1.5
+    assert res["consistency_score"] == 1.0
+    assert res["score"] == 3.0
