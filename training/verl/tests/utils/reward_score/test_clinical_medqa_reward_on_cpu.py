@@ -64,7 +64,7 @@ def test_compute_score_correct():
     )
     assert res["score"] == 1.0
     assert res["outcome_score"] == 1.0
-    assert res["prediction_type"] == "correct"
+    assert res["prediction_type"] == 3
     assert res["is_boxed_valid"] == 1
     assert res["is_abstain"] == 0
 
@@ -76,7 +76,7 @@ def test_compute_score_wrong_option():
         ground_truth=_gt("A"),
     )
     assert res["score"] == -1.0
-    assert res["prediction_type"] == "wrong"
+    assert res["prediction_type"] == 2
     assert res["is_boxed_valid"] == 1
 
 
@@ -88,7 +88,7 @@ def test_compute_score_abstain():
     )
     assert res["score"] == 0.0
     assert res["outcome_score"] == 0.0
-    assert res["prediction_type"] == "abstain"
+    assert res["prediction_type"] == 1
     assert res["is_abstain"] == 1
 
 
@@ -99,7 +99,7 @@ def test_compute_score_no_boxed_is_parse_fail():
         ground_truth=_gt("A"),
     )
     assert res["score"] == -1.0
-    assert res["prediction_type"] == "parse_fail"
+    assert res["prediction_type"] == 0
     assert res["is_boxed_valid"] == 0
 
 
@@ -110,7 +110,7 @@ def test_compute_score_multiple_boxed_is_parse_fail():
         ground_truth=_gt("A"),
     )
     assert res["score"] == -1.0
-    assert res["prediction_type"] == "parse_fail"
+    assert res["prediction_type"] == 0
     assert res["is_boxed_valid"] == 0
 
 
@@ -121,7 +121,7 @@ def test_compute_score_illegal_choice_is_wrong_and_not_boxed_valid():
         ground_truth=_gt("A"),
     )
     assert res["score"] == -1.0
-    assert res["prediction_type"] == "wrong"
+    assert res["prediction_type"] == 2
     assert res["is_boxed_valid"] == 0
 
 

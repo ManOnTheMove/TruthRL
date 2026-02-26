@@ -221,6 +221,14 @@ def compute_score(
         + lambda_consistency * float(consistency_score)
     )
 
+    prediction_type_id = {
+        "parse_fail": 0,
+        "abstain": 1,
+        "wrong": 2,
+        "correct": 3,
+    }.get(str(outcome.get("prediction_type", "")), -1)
+    stage_mode_id = 1 if stage_mode == "d1" else 2 if stage_mode == "d2" else 0
+
     return {
         "score": float(final_score),
         "outcome_score": float(outcome["outcome_score"]),
@@ -228,8 +236,8 @@ def compute_score(
         "consistency_score": float(consistency_score),
         "is_abstain": int(outcome["is_abstain"]),
         "is_boxed_valid": int(outcome["is_boxed_valid"]),
-        "prediction_type": outcome["prediction_type"],
-        "stage_mode": stage_mode,
+        "prediction_type": int(prediction_type_id),
+        "stage_mode": int(stage_mode_id),
         "k": k,
         "lambda_format": lambda_format,
         "lambda_consistency": lambda_consistency,
