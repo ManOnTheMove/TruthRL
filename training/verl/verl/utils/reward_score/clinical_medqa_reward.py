@@ -44,8 +44,8 @@ def is_abstain_boxed(text: str) -> bool:
     """Only boxed abstention should be treated as abstain."""
     if not isinstance(text, str):
         return False
-    normalized = re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
-    return normalized in {"i dont know", "i do not know", "idk"}
+    canonical = re.sub(r"[^a-z0-9]+", "", text.lower())
+    return canonical in {"idontknow", "idonotknow", "idk"}
 
 
 def _extract_target_set(ground_truth: dict[str, Any]) -> set[str]:
