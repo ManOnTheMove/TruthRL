@@ -19,6 +19,9 @@ VAL_BATCH_SIZE="${VAL_BATCH_SIZE:-64}"
 MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH:-2048}"
 MAX_RESPONSE_LENGTH="${MAX_RESPONSE_LENGTH:-1024}"
 ROLLOUT_N="${ROLLOUT_N:-4}"
+GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.4}"
+ROLLOUT_MAX_NUM_SEQS="${ROLLOUT_MAX_NUM_SEQS:-32}"
+ROLLOUT_MAX_BATCHED_TOKENS="${ROLLOUT_MAX_BATCHED_TOKENS:-8192}"
 TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-300}"
 SAVE_FREQ="${SAVE_FREQ:-100}"
 TEST_FREQ="${TEST_FREQ:-50}"
@@ -90,6 +93,7 @@ echo "[INFO] OUTPUT_DIR=${OUTPUT_DIR}"
 echo "[INFO] K=${K} LAMBDA_FORMAT=${LAMBDA_FORMAT} LAMBDA_CONSISTENCY=${LAMBDA_CONSISTENCY}"
 
 "${PY_CMD[@]}" -m verl.trainer.main_ppo \
+  --config-name _generated_ppo_trainer \
   algorithm.adv_estimator=grpo \
   data.train_files="${TRAIN_PARQUET}" \
   data.val_files="${VAL_PARQUET}" \
@@ -114,8 +118,11 @@ echo "[INFO] K=${K} LAMBDA_FORMAT=${LAMBDA_FORMAT} LAMBDA_CONSISTENCY=${LAMBDA_C
   actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=1 \
   actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
   actor_rollout_ref.rollout.name=vllm \
-  actor_rollout_ref.rollout.gpu_memory_utilization=0.7 \
+  actor_rollout_ref.rollout.gpu_memory_utilization="${GPU_MEMORY_UTILIZATION}" \
   actor_rollout_ref.rollout.n="${ROLLOUT_N}" \
+  actor_rollout_ref.rollout.max_num_seqs="${ROLLOUT_MAX_NUM_SEQS}" \
+  actor_rollout_ref.rollout.max_num_batched_tokens="${ROLLOUT_MAX_BATCHED_TOKENS}" \
+  +actor_rollout_ref.rollout.engine_kwargs.vllm.max_num_seqs="${ROLLOUT_MAX_NUM_SEQS}" \
   actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=1 \
   actor_rollout_ref.ref.fsdp_config.param_offload=True \
   reward_model.reward_manager=naive \
