@@ -10,6 +10,20 @@ training/verl/*.whl.1
 # Slurm logs
 slurm*.out
 slurm*.err
+*.out
+*.err
+
+# Large ML artifacts and containers
+*.sif
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.safetensors
+*.gguf
+*.onnx
+*.npy
+*.npz
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

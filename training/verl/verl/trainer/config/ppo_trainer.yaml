@@ -337,5 +337,9 @@ ray_init:
   # Number of CPUs for Ray. Use a fixed number instead of null when using SLURM.
   num_cpus: null
 
+  # Optional Ray temp/session directory. On clusters with restricted /tmp or read-only home/project,
+  # point this to a short writable node-local path to avoid Ray socket path and permission failures.
+  temp_dir: null
+
   # Path to save Ray timeline JSON for performance profiling
   timeline_json_file: null

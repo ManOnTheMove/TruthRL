@@ -3,7 +3,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-MODEL_PATH="${MODEL_PATH:-/home/erichyu/scratch/embc/models/stagec_c8_8b_len10240_ep15_4gpu_step17175/merged_model}"
+MODEL_PATH="${MODEL_PATH:-${REPO_ROOT}/../models/stagec_c8_8b_len10240_ep15_4gpu_step17175/merged_model}"
 TRAIN_PARQUET="${TRAIN_PARQUET:-${REPO_ROOT}/data/medical/verl/medqa_grpo_train.parquet}"
 VAL_PARQUET="${VAL_PARQUET:-${REPO_ROOT}/data/medical/verl/medqa_grpo_test.parquet}"
 

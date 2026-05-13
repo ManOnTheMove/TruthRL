@@ -204,8 +204,9 @@ def compute_score(
     del data_source, extra_info  # kept for signature compatibility
 
     stage_mode = str(kwargs.get("stage_mode", "d1")).strip().lower()
+    is_d3_hard_ook = stage_mode in {"d3", "d3_hard_ook", "hard_ook"}
     k = float(kwargs.get("k", 1.0))
-    plain_ternary = bool(kwargs.get("plain_ternary", True))
+    plain_ternary = bool(kwargs.get("plain_ternary", not is_d3_hard_ook))
     enable_format = bool(kwargs.get("enable_format", stage_mode == "d2"))
     enable_consistency = bool(kwargs.get("enable_consistency", stage_mode == "d2"))
     lambda_format = float(kwargs.get("lambda_format", 1.0))
@@ -227,7 +228,7 @@ def compute_score(
         "wrong": 2,
         "correct": 3,
     }.get(str(outcome.get("prediction_type", "")), -1)
-    stage_mode_id = 1 if stage_mode == "d1" else 2 if stage_mode == "d2" else 0
+    stage_mode_id = 1 if stage_mode == "d1" else 2 if stage_mode == "d2" else 3 if is_d3_hard_ook else 0
 
     return {
         "score": float(final_score),
@@ -238,6 +239,8 @@ def compute_score(
         "is_boxed_valid": int(outcome["is_boxed_valid"]),
         "prediction_type": int(prediction_type_id),
         "stage_mode": int(stage_mode_id),
+        "is_out_of_knowledge": int(bool(ground_truth.get("out_of_knowledge", False))),
+        "plain_ternary": int(bool(plain_ternary)),
         "k": k,
         "lambda_format": lambda_format,
         "lambda_consistency": lambda_consistency,

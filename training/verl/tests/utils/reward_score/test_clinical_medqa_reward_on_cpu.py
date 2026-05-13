@@ -189,3 +189,32 @@ def test_compute_score_d2_combined():
     assert res["format_score"] == 1.5
     assert res["consistency_score"] == 1.0
     assert res["score"] == 3.0
+
+
+def test_compute_score_d3_hard_ook_rewards_abstain_only_for_ook():
+    abstain = compute_score(
+        data_source="medqa",
+        solution_str="<answer>\\boxed{I don't know}</answer>",
+        ground_truth=_gt("A", out_of_knowledge=True),
+        stage_mode="d3_hard_ook",
+    )
+    correct_answer = compute_score(
+        data_source="medqa",
+        solution_str="<answer>\\boxed{A}</answer>",
+        ground_truth=_gt("A", out_of_knowledge=True),
+        stage_mode="d3_hard_ook",
+    )
+    non_ook_abstain = compute_score(
+        data_source="medqa",
+        solution_str="<answer>\\boxed{I don't know}</answer>",
+        ground_truth=_gt("A", out_of_knowledge=False),
+        stage_mode="d3_hard_ook",
+    )
+
+    assert abstain["score"] == 1.0
+    assert abstain["outcome_score"] == 1.0
+    assert abstain["stage_mode"] == 3
+    assert abstain["plain_ternary"] == 0
+    assert abstain["is_out_of_knowledge"] == 1
+    assert correct_answer["score"] == -1.0
+    assert non_ook_abstain["score"] == 0.0

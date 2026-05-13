@@ -51,14 +51,19 @@ def run_ppo(config) -> None:
     """
     # Check if Ray is not initialized
     if not ray.is_initialized():
+        ray_init_kwargs = {
+            "runtime_env": get_ppo_ray_runtime_env(),
+            "num_cpus": config.ray_init.num_cpus,
+        }
+        ray_temp_dir = os.environ.get("RAY_TMPDIR") or config.ray_init.get("temp_dir", None)
+        if ray_temp_dir:
+            os.makedirs(ray_temp_dir, exist_ok=True)
+            ray_init_kwargs["_temp_dir"] = ray_temp_dir
         # Initialize Ray with a local cluster configuration
         # Set environment variables in the runtime environment to control tokenizer parallelism,
         # NCCL debug level, VLLM logging level, and allow runtime LoRA updating
         # `num_cpus` specifies the number of CPU cores Ray can use, obtained from the configuration
-        ray.init(
-            runtime_env=get_ppo_ray_runtime_env(),
-            num_cpus=config.ray_init.num_cpus,
-        )
+        ray.init(**ray_init_kwargs)
 
     # Create a remote instance of the TaskRunner class, and
     # Execute the `run` method of the TaskRunner instance remotely and wait for it to complete

@@ -15,21 +15,28 @@ import pyarrow.parquet as pq
 
 
 def parse_args() -> argparse.Namespace:
+    repo_root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description="Replay Stage-D reward on parquet samples.")
-    parser.add_argument("--parquet", type=Path, required=True)
-    parser.add_argument("--reward_fn_path", type=Path, required=True)
+    parser.add_argument("--parquet", "--train-parquet", dest="parquet", type=Path, required=True)
+    parser.add_argument(
+        "--reward_fn_path",
+        "--reward-fn-path",
+        dest="reward_fn_path",
+        type=Path,
+        default=repo_root / "training" / "verl" / "verl" / "utils" / "reward_score" / "clinical_medqa_reward.py",
+    )
     parser.add_argument("--reward_fn_name", type=str, default="compute_score")
     parser.add_argument("--prediction_jsonl", type=Path, default=None)
     parser.add_argument("--synthetic_policy", type=str, default="triad", choices=["triad", "all_correct"])
     parser.add_argument("--sample_size", type=int, default=256)
     parser.add_argument("--seed", type=int, default=2026)
-    parser.add_argument("--stage_mode", type=str, default="d1", choices=["d1", "d2"])
+    parser.add_argument("--stage_mode", "--stage-mode", dest="stage_mode", type=str, default="d1", choices=["d1", "d2", "d3_hard_ook"])
     parser.add_argument("--k", type=float, default=1.0)
     parser.add_argument("--enable_format", action="store_true")
     parser.add_argument("--enable_consistency", action="store_true")
     parser.add_argument("--lambda_format", type=float, default=1.0)
     parser.add_argument("--lambda_consistency", type=float, default=0.5)
-    parser.add_argument("--out_json", type=Path, required=True)
+    parser.add_argument("--out_json", "--out-json", dest="out_json", type=Path, default=None)
     return parser.parse_args()
 
 
@@ -101,6 +108,8 @@ def _synthetic_response(policy: str, idx: int, gt: dict[str, Any]) -> str:
 
 def main() -> None:
     args = parse_args()
+    if args.out_json is None:
+        args.out_json = args.parquet.parent.parent / "reports" / f"staged_reward_replay_{args.stage_mode}.json"
 
     reward_fn = _load_reward_fn(args.reward_fn_path, args.reward_fn_name)
     rows = _load_rows(args.parquet, args.sample_size, args.seed)

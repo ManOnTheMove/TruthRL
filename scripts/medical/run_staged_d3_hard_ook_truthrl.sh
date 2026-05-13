@@ -4,12 +4,16 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 MODEL_PATH="${MODEL_PATH:-${REPO_ROOT}/../models/stagec_c8_8b_len10240_ep15_4gpu_step17175/merged_model}"
-TRAIN_PARQUET="${TRAIN_PARQUET:-${REPO_ROOT}/data/medical/verl/medqa_grpo_train.parquet}"
+TRAIN_PARQUET="${TRAIN_PARQUET:-${REPO_ROOT}/data/medical/verl/medqa_grpo_train_with_ook_d26.parquet}"
 VAL_PARQUET="${VAL_PARQUET:-${REPO_ROOT}/data/medical/verl/medqa_grpo_test.parquet}"
 
-RUN_ROOT="${RUN_ROOT:-${REPO_ROOT}/data/medical/staged/d1_truthrl_core}"
+RUN_ROOT="${RUN_ROOT:-${REPO_ROOT}/data/medical/staged/d3_hard_ook_truthrl}"
 OUTPUT_DIR="${OUTPUT_DIR:-${RUN_ROOT}/checkpoints}"
 LOG_DIR="${LOG_DIR:-${RUN_ROOT}/logs}"
+HYDRA_RUN_DIR="${HYDRA_RUN_DIR:-${LOG_DIR}/hydra/${SLURM_JOB_ID:-manual}}"
+JOB_ID="${SLURM_JOB_ID:-manual}"
+LOCAL_TMP_ROOT="${LOCAL_TMP_ROOT:-/tmp/d3_${JOB_ID}}"
+RAY_TMPDIR="${RAY_TMPDIR:-${LOCAL_TMP_ROOT}/ray}"
 
 USE_APPTAINER="${USE_APPTAINER:-1}"
 NPROC_PER_NODE="${NPROC_PER_NODE:-1}"
@@ -22,15 +26,25 @@ ROLLOUT_N="${ROLLOUT_N:-4}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.4}"
 ROLLOUT_MAX_NUM_SEQS="${ROLLOUT_MAX_NUM_SEQS:-32}"
 ROLLOUT_MAX_BATCHED_TOKENS="${ROLLOUT_MAX_BATCHED_TOKENS:-8192}"
+ROLLOUT_MAX_MODEL_LEN="${ROLLOUT_MAX_MODEL_LEN:-$((MAX_PROMPT_LENGTH + MAX_RESPONSE_LENGTH))}"
+if (( ROLLOUT_MAX_BATCHED_TOKENS < ROLLOUT_MAX_MODEL_LEN )); then
+  echo "[WARN] ROLLOUT_MAX_BATCHED_TOKENS=${ROLLOUT_MAX_BATCHED_TOKENS} is smaller than ROLLOUT_MAX_MODEL_LEN=${ROLLOUT_MAX_MODEL_LEN}; raising it to ${ROLLOUT_MAX_MODEL_LEN}." >&2
+  ROLLOUT_MAX_BATCHED_TOKENS="${ROLLOUT_MAX_MODEL_LEN}"
+fi
 TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-300}"
 SAVE_FREQ="${SAVE_FREQ:-100}"
 TEST_FREQ="${TEST_FREQ:-50}"
+VAL_BEFORE_TRAIN="${VAL_BEFORE_TRAIN:-True}"
 LR="${LR:-1e-6}"
 K="${K:-1}"
-PROJECT_NAME="${PROJECT_NAME:-stage-d-d1}"
-EXPERIMENT_NAME="${EXPERIMENT_NAME:-truthrl-core-d1}"
+PROJECT_NAME="${PROJECT_NAME:-stage-d-d3}"
+EXPERIMENT_NAME="${EXPERIMENT_NAME:-truthrl-hard-ook-d3}"
 
-mkdir -p "${OUTPUT_DIR}" "${LOG_DIR}"
+mkdir -p "${OUTPUT_DIR}" "${LOG_DIR}" "${HYDRA_RUN_DIR}" "${RAY_TMPDIR}" "${LOCAL_TMP_ROOT}"
+export HYDRA_FULL_ERROR="${HYDRA_FULL_ERROR:-1}"
+export RAY_TMPDIR
+export TMPDIR="${D3_TMPDIR:-${LOCAL_TMP_ROOT}/tmp}"
+mkdir -p "${TMPDIR}"
 
 if [[ ! -f "${MODEL_PATH}/config.json" ]]; then
   echo "[ERROR] MODEL_PATH invalid: ${MODEL_PATH}" >&2
@@ -51,7 +65,7 @@ if [[ "${USE_APPTAINER}" == "1" ]]; then
   elif [[ -f "${REPO_ROOT}/truthrl.sif" ]]; then
     IMAGE_PATH="${REPO_ROOT}/truthrl.sif"
   else
-    IMAGE_PATH="$(cd "${REPO_ROOT}/../.." && pwd)/envs/truthrl_apptainer/truthrl.sif"
+    IMAGE_PATH="$(cd "${REPO_ROOT}/.." && pwd)/envs/truthrl_apptainer/truthrl.sif"
   fi
 
   if ! command -v apptainer >/dev/null 2>&1; then
@@ -74,24 +88,56 @@ if [[ "${USE_APPTAINER}" == "1" ]]; then
   export APPTAINER_TMPDIR="${APPTAINER_TMPDIR:-${NODE_TMPDIR}/apptainer_tmp_${USER}}"
   mkdir -p "${APPTAINER_CACHEDIR}" "${APPTAINER_TMPDIR}"
 
+  SCRATCH_ROOT="${SCRATCH_ROOT:-/scratch/${USER}}"
+  CACHE_ROOT="${CACHE_ROOT:-${SCRATCH_ROOT}/.cache}"
+  CONFIG_ROOT="${CONFIG_ROOT:-${SCRATCH_ROOT}/.config}"
+  mkdir -p "${CACHE_ROOT}/huggingface/modules" "${CACHE_ROOT}/flashinfer" "${CONFIG_ROOT}/vllm"
+
+  export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-${CONFIG_ROOT}}"
+  export XDG_CACHE_HOME="${XDG_CACHE_HOME:-${CACHE_ROOT}}"
+  export HF_HOME="${HF_HOME:-${CACHE_ROOT}/huggingface}"
+  export HF_MODULES_CACHE="${HF_MODULES_CACHE:-${HF_HOME}/modules}"
+  export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-${CACHE_ROOT}/triton}"
+  export CUDA_CACHE_PATH="${CUDA_CACHE_PATH:-${CACHE_ROOT}/cuda}"
+  export TORCHINDUCTOR_CACHE_DIR="${TORCHINDUCTOR_CACHE_DIR:-${CACHE_ROOT}/torchinductor}"
+  export FLASHINFER_CACHE_DIR="${FLASHINFER_CACHE_DIR:-${CACHE_ROOT}/flashinfer}"
+  mkdir -p "${TRITON_CACHE_DIR}" "${CUDA_CACHE_PATH}" "${TORCHINDUCTOR_CACHE_DIR}" "${FLASHINFER_CACHE_DIR}"
+  if [[ -z "${APPTAINER_BINDPATH:-}" ]]; then
+    export APPTAINER_BINDPATH="/project:/project,/home/${USER}:/home/${USER},/scratch:/scratch,${CACHE_ROOT}:/home/${USER}/.cache,${CONFIG_ROOT}:/home/${USER}/.config"
+  fi
+
   NV_FLAG=()
   if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
     NV_FLAG=(--nv)
   fi
-  PY_CMD=(apptainer exec "${NV_FLAG[@]}" --cleanenv --env "PYTHONPATH=${REPO_ROOT}/training/verl" "${IMAGE_PATH}" python3)
+
+  BIND_FLAG=()
+  if [[ -n "${APPTAINER_BINDPATH:-}" ]]; then
+    BIND_FLAG=(--bind "${APPTAINER_BINDPATH}")
+  fi
+
+  CONTAINER_ENVS="PYTHONPATH=${REPO_ROOT}/training/verl,RAY_TMPDIR=${RAY_TMPDIR},TMPDIR=${TMPDIR},XDG_CONFIG_HOME=/home/${USER}/.config,XDG_CACHE_HOME=/home/${USER}/.cache,HF_HOME=/home/${USER}/.cache/huggingface,HF_MODULES_CACHE=/home/${USER}/.cache/huggingface/modules,TRITON_CACHE_DIR=/home/${USER}/.cache/triton,CUDA_CACHE_PATH=/home/${USER}/.cache/cuda,TORCHINDUCTOR_CACHE_DIR=/home/${USER}/.cache/torchinductor,FLASHINFER_CACHE_DIR=/home/${USER}/.cache/flashinfer"
+  PY_CMD=(apptainer exec "${NV_FLAG[@]}" "${BIND_FLAG[@]}" --cleanenv --env "${CONTAINER_ENVS}" "${IMAGE_PATH}" python3)
 else
   PY_CMD=(python3)
 fi
 
-echo "[INFO] D1 GRPO run"
+echo "[INFO] D3 hard-OOK GRPO run"
 echo "[INFO] MODEL_PATH=${MODEL_PATH}"
 echo "[INFO] TRAIN_PARQUET=${TRAIN_PARQUET}"
 echo "[INFO] VAL_PARQUET=${VAL_PARQUET}"
 echo "[INFO] OUTPUT_DIR=${OUTPUT_DIR}"
+echo "[INFO] HYDRA_RUN_DIR=${HYDRA_RUN_DIR}"
+echo "[INFO] RAY_TMPDIR=${RAY_TMPDIR}"
+echo "[INFO] TMPDIR=${TMPDIR}"
+echo "[INFO] VAL_BEFORE_TRAIN=${VAL_BEFORE_TRAIN}"
+echo "[INFO] ROLLOUT_MAX_MODEL_LEN=${ROLLOUT_MAX_MODEL_LEN}"
+echo "[INFO] ROLLOUT_MAX_BATCHED_TOKENS=${ROLLOUT_MAX_BATCHED_TOKENS}"
 echo "[INFO] K=${K}"
 
 "${PY_CMD[@]}" -m verl.trainer.main_ppo \
   --config-name _generated_ppo_trainer \
+  hydra.run.dir="${HYDRA_RUN_DIR}" \
   algorithm.adv_estimator=grpo \
   data.train_files="${TRAIN_PARQUET}" \
   data.val_files="${VAL_PARQUET}" \
@@ -118,6 +164,7 @@ echo "[INFO] K=${K}"
   actor_rollout_ref.rollout.name=vllm \
   actor_rollout_ref.rollout.gpu_memory_utilization="${GPU_MEMORY_UTILIZATION}" \
   actor_rollout_ref.rollout.n="${ROLLOUT_N}" \
+  actor_rollout_ref.rollout.max_model_len="${ROLLOUT_MAX_MODEL_LEN}" \
   actor_rollout_ref.rollout.max_num_seqs="${ROLLOUT_MAX_NUM_SEQS}" \
   actor_rollout_ref.rollout.max_num_batched_tokens="${ROLLOUT_MAX_BATCHED_TOKENS}" \
   +actor_rollout_ref.rollout.engine_kwargs.vllm.max_num_seqs="${ROLLOUT_MAX_NUM_SEQS}" \
@@ -126,7 +173,7 @@ echo "[INFO] K=${K}"
   reward_model.reward_manager=naive \
   custom_reward_function.path="${REPO_ROOT}/training/verl/verl/utils/reward_score/clinical_medqa_reward.py" \
   custom_reward_function.name=compute_score \
-  +custom_reward_function.reward_kwargs.stage_mode=d1 \
+  +custom_reward_function.reward_kwargs.stage_mode=d3_hard_ook \
   +custom_reward_function.reward_kwargs.k="${K}" \
   +custom_reward_function.reward_kwargs.enable_format=False \
   +custom_reward_function.reward_kwargs.enable_consistency=False \
@@ -136,10 +183,11 @@ echo "[INFO] K=${K}"
   trainer.logger='["console"]' \
   trainer.project_name="${PROJECT_NAME}" \
   trainer.experiment_name="${EXPERIMENT_NAME}" \
+  trainer.val_before_train="${VAL_BEFORE_TRAIN}" \
   trainer.n_gpus_per_node="${NPROC_PER_NODE}" \
   trainer.nnodes="${NNODES}" \
   trainer.save_freq="${SAVE_FREQ}" \
   trainer.test_freq="${TEST_FREQ}" \
   trainer.total_training_steps="${TOTAL_TRAINING_STEPS}" "$@"
 
-echo "[PASS] D1 run completed."
+echo "[PASS] D3 hard-OOK run completed."
