@@ -16,7 +16,6 @@ import hashlib
 import importlib.util
 import json
 import math
-import re
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,8 +25,6 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from transformers import AutoTokenizer
 
-
-BOXED_PATTERN = re.compile(r"\\boxed\s*{(.*?)}", re.DOTALL)
 
 
 def parse_args() -> argparse.Namespace:
@@ -178,69 +175,26 @@ def load_examples(
 
 
 def parse_prediction(reward_module: Any, text: str, targets: set[str], choices: set[str]) -> dict[str, Any]:
-    matches = BOXED_PATTERN.findall(text if isinstance(text, str) else "")
-    if len(matches) == 0:
-        return {
-            "boxed_raw": "",
-            "parsed_choice": "",
-            "normalized_choice": "",
-            "is_abstain": 0,
-            "is_boxed_valid": 0,
-            "is_correct": 0,
-            "parse_status": "no_boxed",
-        }
-    if len(matches) > 1:
-        return {
-            "boxed_raw": " | ".join(x.strip() for x in matches),
-            "parsed_choice": "",
-            "normalized_choice": "",
-            "is_abstain": 0,
-            "is_boxed_valid": 0,
-            "is_correct": 0,
-            "parse_status": "multi_boxed",
-        }
+    parsed = reward_module.parse_medical_answer(
+        text,
+        policy=reward_module.POLICY_SINGLE_BOXED_STRICT,
+        choice_set=choices,
+    )
+    parsed_choice = parsed.normalized_choice if parsed.parse_status in {"ok_choice", "choice_out_of_set"} else ""
+    if parsed.is_abstain:
+        parsed_choice = "I don't know"
 
-    boxed = matches[0].strip()
-    if reward_module.is_abstain_boxed(boxed):
-        return {
-            "boxed_raw": boxed,
-            "parsed_choice": "I don't know",
-            "normalized_choice": "I don't know",
-            "is_abstain": 1,
-            "is_boxed_valid": 1,
-            "is_correct": 0,
-            "parse_status": "ok_abstain",
-        }
-
-    normalized = reward_module.normalize_choice(boxed)
-    if not normalized:
-        return {
-            "boxed_raw": boxed,
-            "parsed_choice": "",
-            "normalized_choice": "",
-            "is_abstain": 0,
-            "is_boxed_valid": 0,
-            "is_correct": 0,
-            "parse_status": "invalid_choice",
-        }
-    if choices and normalized not in choices:
-        return {
-            "boxed_raw": boxed,
-            "parsed_choice": normalized,
-            "normalized_choice": normalized,
-            "is_abstain": 0,
-            "is_boxed_valid": 0,
-            "is_correct": 0,
-            "parse_status": "choice_out_of_set",
-        }
     return {
-        "boxed_raw": boxed,
-        "parsed_choice": normalized,
-        "normalized_choice": normalized,
-        "is_abstain": 0,
-        "is_boxed_valid": 1,
-        "is_correct": int(normalized in targets),
-        "parse_status": "ok_choice",
+        "boxed_raw": parsed.boxed_raw,
+        "parsed_choice": parsed_choice,
+        "normalized_choice": parsed.normalized_choice,
+        "is_abstain": int(parsed.is_abstain),
+        "is_boxed_valid": int(parsed.parse_status in {"ok_choice", "ok_abstain"}),
+        "is_correct": int(parsed.parse_status == "ok_choice" and parsed.normalized_choice in targets),
+        "parse_status": parsed.parse_status,
+        "parser_policy": parsed.policy,
+        "boxed_count": int(parsed.boxed_count),
+        "used_answer_block": int(parsed.used_answer_block),
     }
 
 
@@ -366,6 +320,10 @@ def main() -> None:
         "output_dir": str(out_dir),
         "example_count": len(examples),
         "groups": args.groups,
+        "parser": {
+            "policy": reward_module.POLICY_SINGLE_BOXED_STRICT,
+            "module": "verl.utils.reward_score.medical_answer_parser",
+        },
         "standard_parquet": str(args.standard_parquet),
         "d26_parquet": str(args.d26_parquet),
         "generation": {
@@ -482,7 +440,20 @@ def main() -> None:
 
     write_jsonl(predictions_jsonl, records)
     pq.write_table(pa.Table.from_pylist(records), predictions_parquet, compression="zstd")
-    metrics_json.write_text(json.dumps({"model_id": args.model_id, "metrics": metrics}, indent=2), encoding="utf-8")
+    metrics_json.write_text(
+        json.dumps(
+            {
+                "model_id": args.model_id,
+                "parser": {
+                    "policy": reward_module.POLICY_SINGLE_BOXED_STRICT,
+                    "module": "verl.utils.reward_score.medical_answer_parser",
+                },
+                "metrics": metrics,
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     write_metrics_csv(metrics_csv, metrics)
 
     manifest["ended_at_utc"] = utc_now()

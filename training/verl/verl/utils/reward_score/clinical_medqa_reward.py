@@ -4,49 +4,41 @@
 
 from __future__ import annotations
 
+import importlib.util
 import re
+import sys
+from pathlib import Path
 from typing import Any
 
+try:
+    from verl.utils.reward_score.medical_answer_parser import (
+        POLICY_FINAL_ANSWER_LAST_BOXED,
+        POLICY_FIRST_BOXED_LEGACY,
+        POLICY_SINGLE_BOXED_STRICT,
+        extract_single_boxed,
+        is_abstain_boxed,
+        normalize_choice,
+        parse_medical_answer,
+    )
+except ModuleNotFoundError:
+    _PARSER_PATH = Path(__file__).with_name("medical_answer_parser.py")
+    _PARSER_SPEC = importlib.util.spec_from_file_location("medical_answer_parser", str(_PARSER_PATH))
+    if _PARSER_SPEC is None or _PARSER_SPEC.loader is None:
+        raise
+    _PARSER_MODULE = importlib.util.module_from_spec(_PARSER_SPEC)
+    sys.modules[_PARSER_SPEC.name] = _PARSER_MODULE
+    _PARSER_SPEC.loader.exec_module(_PARSER_MODULE)
+    POLICY_FINAL_ANSWER_LAST_BOXED = _PARSER_MODULE.POLICY_FINAL_ANSWER_LAST_BOXED
+    POLICY_FIRST_BOXED_LEGACY = _PARSER_MODULE.POLICY_FIRST_BOXED_LEGACY
+    POLICY_SINGLE_BOXED_STRICT = _PARSER_MODULE.POLICY_SINGLE_BOXED_STRICT
+    extract_single_boxed = _PARSER_MODULE.extract_single_boxed
+    is_abstain_boxed = _PARSER_MODULE.is_abstain_boxed
+    normalize_choice = _PARSER_MODULE.normalize_choice
+    parse_medical_answer = _PARSER_MODULE.parse_medical_answer
+
+
 _BOXED_PATTERN = re.compile(r"\\boxed\s*{(.*?)}", re.DOTALL)
-_OPTION_LABEL_PATTERN = re.compile(r"^\s*([A-Za-z])\s*[:.)\]-]?\s*")
 _THINK_ANSWER_PATTERN = re.compile(r"<think>(.*?)</think>\s*<answer>(.*?)</answer>", re.DOTALL | re.IGNORECASE)
-
-
-def extract_single_boxed(solution_str: str) -> tuple[bool, str | None]:
-    """Return whether exactly one boxed answer exists and its content."""
-    if not isinstance(solution_str, str):
-        return False, None
-    matches = _BOXED_PATTERN.findall(solution_str)
-    if len(matches) != 1:
-        return False, None
-    return True, matches[0].strip()
-
-
-def normalize_choice(text: str) -> str:
-    """Normalize a MCQ choice token to an uppercase option label when possible."""
-    if not isinstance(text, str):
-        return ""
-
-    stripped = text.strip()
-    if not stripped:
-        return ""
-
-    match = _OPTION_LABEL_PATTERN.match(stripped)
-    if match:
-        return match.group(1).upper()
-
-    compact = re.sub(r"\s+", "", stripped).upper()
-    if len(compact) == 1 and "A" <= compact <= "Z":
-        return compact
-    return ""
-
-
-def is_abstain_boxed(text: str) -> bool:
-    """Only boxed abstention should be treated as abstain."""
-    if not isinstance(text, str):
-        return False
-    canonical = re.sub(r"[^a-z0-9]+", "", text.lower())
-    return canonical in {"idontknow", "idonotknow", "idk"}
 
 
 def _extract_target_set(ground_truth: dict[str, Any]) -> set[str]:
@@ -67,9 +59,9 @@ def _extract_choice_set(ground_truth: dict[str, Any]) -> set[str]:
     for item in choices:
         if not isinstance(item, str):
             continue
-        m = _OPTION_LABEL_PATTERN.match(item)
-        if m:
-            labels.add(m.group(1).upper())
+        label = normalize_choice(item)
+        if label:
+            labels.add(label)
     return labels
 
 
@@ -79,8 +71,14 @@ def compute_outcome_score(
     plain_ternary: bool = True,
 ) -> dict[str, Any]:
     """Compute plain ternary score (+1 / 0 / -1) for medical MCQ."""
-    valid_boxed, boxed_content = extract_single_boxed(solution_str)
-    if not valid_boxed or boxed_content is None:
+    target_set = _extract_target_set(ground_truth)
+    choice_set = _extract_choice_set(ground_truth)
+    parsed = parse_medical_answer(
+        solution_str,
+        policy=POLICY_SINGLE_BOXED_STRICT,
+        choice_set=choice_set,
+    )
+    if parsed.parse_status in {"no_boxed", "multi_boxed"}:
         return {
             "outcome_score": -1.0,
             "is_abstain": 0,
@@ -88,7 +86,7 @@ def compute_outcome_score(
             "prediction_type": "parse_fail",
         }
 
-    if is_abstain_boxed(boxed_content):
+    if parsed.is_abstain:
         # Stage D-1 default: plain ternary, abstain=0.
         if plain_ternary:
             outcome = 0.0
@@ -103,8 +101,8 @@ def compute_outcome_score(
             "prediction_type": "abstain",
         }
 
-    normalized_pred = normalize_choice(boxed_content)
-    if not normalized_pred:
+    normalized_pred = parsed.normalized_choice
+    if parsed.parse_status in {"invalid_choice", "choice_out_of_set"} or not normalized_pred:
         return {
             "outcome_score": -1.0,
             "is_abstain": 0,
@@ -112,8 +110,6 @@ def compute_outcome_score(
             "prediction_type": "wrong",
         }
 
-    target_set = _extract_target_set(ground_truth)
-    choice_set = _extract_choice_set(ground_truth)
 
     if not plain_ternary and bool(ground_truth.get("out_of_knowledge", False)):
         return {

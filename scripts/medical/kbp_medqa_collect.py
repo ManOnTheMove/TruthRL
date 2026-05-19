@@ -14,7 +14,6 @@ import importlib.util
 import json
 import multiprocessing as mp
 import os
-import re
 import shutil
 import subprocess
 import time
@@ -30,8 +29,6 @@ import pyarrow.parquet as pq
 from transformers import AutoTokenizer
 
 
-BOXED_PATTERN = re.compile(r"\\boxed\s*{(.*?)}", re.DOTALL)
-ANSWER_TAG_PATTERN = re.compile(r"<answer>(.*?)</answer>", re.DOTALL | re.IGNORECASE)
 MONITOR_REPORT_INTERVAL_S = 600.0
 MONITOR_SAMPLE_INTERVAL_S = 30.0
 
@@ -362,21 +359,14 @@ class ParquetPartWriter:
         self.flush()
 
 
-def _extract_final_boxed(response_text: str) -> tuple[bool, str]:
-    if not isinstance(response_text, str):
+def _extract_final_boxed(reward_module: Any, response_text: str) -> tuple[bool, str]:
+    parsed = reward_module.parse_medical_answer(
+        response_text,
+        policy=reward_module.POLICY_FINAL_ANSWER_LAST_BOXED,
+    )
+    if parsed.parse_status == "no_boxed":
         return False, ""
-
-    answer_blocks = ANSWER_TAG_PATTERN.findall(response_text)
-    if answer_blocks:
-        answer_matches = BOXED_PATTERN.findall(answer_blocks[-1])
-        if answer_matches:
-            return True, answer_matches[-1].strip()
-
-    global_matches = BOXED_PATTERN.findall(response_text)
-    if global_matches:
-        return True, global_matches[-1].strip()
-
-    return False, ""
+    return True, parsed.boxed_raw
 
 
 def _parse_response(
@@ -385,52 +375,25 @@ def _parse_response(
     target_set: set[str],
     choice_set: set[str],
 ) -> dict[str, Any]:
-    has_boxed, boxed_raw = _extract_final_boxed(response_text)
-    if not has_boxed:
-        return {
-            "boxed_raw": "",
-            "normalized_choice": "",
-            "is_abstain": 0,
-            "is_correct": 0,
-            "parse_status": "no_boxed",
-        }
-
-    if reward_module.is_abstain_boxed(boxed_raw):
-        return {
-            "boxed_raw": boxed_raw,
-            "normalized_choice": "I don't know",
-            "is_abstain": 1,
-            "is_correct": 0,
-            "parse_status": "ok_abstain",
-        }
-
-    normalized = reward_module.normalize_choice(boxed_raw)
-    if not normalized:
-        return {
-            "boxed_raw": boxed_raw,
-            "normalized_choice": "",
-            "is_abstain": 0,
-            "is_correct": 0,
-            "parse_status": "invalid_choice",
-        }
-
-    if choice_set and normalized not in choice_set:
-        return {
-            "boxed_raw": boxed_raw,
-            "normalized_choice": normalized,
-            "is_abstain": 0,
-            "is_correct": 0,
-            "parse_status": "choice_out_of_set",
-        }
-
-    is_correct = int(normalized in target_set)
-    return {
-        "boxed_raw": boxed_raw,
-        "normalized_choice": normalized,
-        "is_abstain": 0,
-        "is_correct": is_correct,
-        "parse_status": "ok_choice",
+    parsed = reward_module.parse_medical_answer(
+        response_text,
+        policy=reward_module.POLICY_FINAL_ANSWER_LAST_BOXED,
+        choice_set=choice_set,
+    )
+    base = {
+        "boxed_raw": parsed.boxed_raw,
+        "normalized_choice": parsed.normalized_choice,
+        "is_abstain": int(parsed.is_abstain),
+        "is_correct": 0,
+        "parse_status": parsed.parse_status,
+        "parser_policy": parsed.policy,
+        "boxed_count": int(parsed.boxed_count),
+        "used_answer_block": int(parsed.used_answer_block),
     }
+
+    if parsed.parse_status == "ok_choice":
+        base["is_correct"] = int(parsed.normalized_choice in target_set)
+    return base
 
 
 def _worker_run(
@@ -580,6 +543,9 @@ def _worker_run(
                             "is_abstain": int(parsed["is_abstain"]),
                             "is_correct": int(parsed["is_correct"]),
                             "parse_status": parsed["parse_status"],
+                            "parser_policy": parsed["parser_policy"],
+                            "boxed_count": int(parsed["boxed_count"]),
+                            "used_answer_block": int(parsed["used_answer_block"]),
                         }
                     )
                     total_generated += 1
@@ -935,6 +901,10 @@ def main() -> None:
         "input_parquet": str(args.input_parquet),
         "output_run_dir": str(run_dir),
         "split": args.split,
+        "parser": {
+            "policy": reward_module.POLICY_FINAL_ANSWER_LAST_BOXED,
+            "module": "verl.utils.reward_score.medical_answer_parser",
+        },
         "question_count": len(questions),
         "expected_row_count": len(questions) * args.probes_per_question,
         "model_path": str(args.model_path),
@@ -1162,6 +1132,10 @@ def main() -> None:
             "moved_parsed_parts": moved_parsed,
         },
         "validation": validation,
+        "parser": {
+            "policy": reward_module.POLICY_FINAL_ANSWER_LAST_BOXED,
+            "module": "verl.utils.reward_score.medical_answer_parser",
+        },
         "parse_status_counts": dict(parse_status_counter),
         "label_stats": {
             "ook_question_count": int(sum(1 for x in labels if x["ook"])),

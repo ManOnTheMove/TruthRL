@@ -5,10 +5,13 @@
 # LICENSE file in the root directory of this source tree.
 
 import ast
+import importlib.util
 import os
 import re
 import json
 import string
+import sys
+from pathlib import Path
 from loguru import logger
 from tqdm.auto import tqdm
 from openai import APIConnectionError, OpenAI, RateLimitError
@@ -72,6 +75,18 @@ def parse_response(response: str):
         print(f"Parsing Error with resp: {response}")
         print(f"Error: {e}")
         return response, -1
+
+
+def load_medical_answer_parser():
+    repo_root = Path(__file__).resolve().parents[1]
+    parser_path = repo_root / "training" / "verl" / "verl" / "utils" / "reward_score" / "medical_answer_parser.py"
+    spec = importlib.util.spec_from_file_location("medical_answer_parser", str(parser_path))
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load medical answer parser from {parser_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def load_data_in_batches(data, batch_size, n_sample=None):
@@ -177,6 +192,7 @@ def evaluate_predictions(queries, ground_truths, alt_answers, predictions, evalu
     n_no_boxed = 0
     system_message = get_system_message(type='outcome')
     llm_responses = []
+    answer_parser = load_medical_answer_parser()
     
     client = OpenAI(
         base_url=base_url,
@@ -236,11 +252,14 @@ def evaluate_predictions(queries, ground_truths, alt_answers, predictions, evalu
             is_exact_match = False
             eval_explanation = None
             
-            # extract predicted answer from \boxed{}
-            prediction = re.search(r'\\boxed{(.*?)}', prediction, re.DOTALL)
+            # Preserve legacy eval semantics: use the first global boxed answer.
+            parsed_prediction = answer_parser.parse_medical_answer(
+                prediction,
+                policy=answer_parser.POLICY_FIRST_BOXED_LEGACY,
+            )
 
-            if prediction:
-                prediction = prediction.group(1).strip()
+            if parsed_prediction.parse_status != "no_boxed":
+                prediction = parsed_prediction.boxed_raw.strip()
             else:
                 eval_explanation = {"score": -1, "explanation": "Evaluation Error: prediction not in \\boxed{} format"}
                 query_eval_results.append(eval_explanation)
