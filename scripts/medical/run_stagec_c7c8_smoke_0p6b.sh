@@ -138,13 +138,15 @@ if [[ -f "${latest_ckpt}/adapter_config.json" ]]; then
     --base_model_path "${MODEL_PATH}" \
     --lora_model_path "${latest_ckpt}" \
     --merged_model_save_path "${MERGED_DIR}" \
-    --trust_remote_code
+    --trust_remote_code \
+    --expected-lora-alpha "${EXPECT_LORA_ALPHA}"
 else
   echo "[INFO] adapter_config.json not found, fallback to verl.model_merger (fsdp backend)."
   "${PY_CMD[@]}" -m verl.model_merger merge \
     --backend fsdp \
     --local_dir "${latest_ckpt}" \
-    --target_dir "${MERGED_DIR}"
+    --target_dir "${MERGED_DIR}" \
+    --lora-alpha "${EXPECT_LORA_ALPHA}"
 
   ADAPTER_DIR="${MERGED_DIR}/lora_adapter"
   ADAPTER_CFG="${ADAPTER_DIR}/adapter_config.json"
@@ -159,7 +161,8 @@ else
     --base_model_path "${MODEL_PATH}" \
     --lora_model_path "${ADAPTER_DIR}" \
     --merged_model_save_path "${MERGED_DIR}" \
-    --trust_remote_code
+    --trust_remote_code \
+    --expected-lora-alpha "${EXPECT_LORA_ALPHA}"
 fi
 
 echo "[INFO] Validating merged model loadability"

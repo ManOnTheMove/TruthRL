@@ -89,9 +89,12 @@ class ModelMergerConfig:
     is_value_model: bool = False
     hf_model_path: Optional[str] = None
     hf_upload: bool = field(init=False)
+    lora_alpha: Optional[float] = None
 
     def __post_init__(self):
         self.hf_upload = self.operation == "merge" and bool(self.hf_upload_path)
+        if self.lora_alpha is not None and self.lora_alpha <= 0:
+            raise ValueError(f"lora_alpha must be > 0 when provided, got {self.lora_alpha}")
         if self.operation == "test":
             self.target_dir = None
             self.hf_upload_path = None
@@ -168,10 +171,15 @@ class BaseModelMerger(ABC):
             lora_params[lora_key] = state_dict.pop(name)
 
         lora_rank = min(lora_params[lora_key].shape[0], lora_params[lora_key].shape[1])
+        if self.config.lora_alpha is None:
+            raise ValueError(
+                "LoRA adapter export requires --lora-alpha. "
+                "The merger cannot infer alpha from tensor rank, and writing lora_alpha=0 disables the adapter."
+            )
         peft_dict = {
             "r": lora_rank,
-            "lora_alpha": 0,  # lora_alpha is not set. An error should be raised to inform the user to set it manually.
-            "target_modules": list(target_modules),
+            "lora_alpha": self.config.lora_alpha,
+            "target_modules": sorted(target_modules),
         }
         peft_config = peft.LoraConfig(**peft_dict).to_dict()
         peft_config["task_type"] = peft_config["task_type"].value if peft_config["task_type"] else None
@@ -719,6 +727,12 @@ def main():
         action="store_true",
         help="Whether the model is a value model (currently only Megatron supported)",
     )
+    base_op_parser.add_argument(
+        "--lora-alpha",
+        type=float,
+        default=None,
+        help="LoRA alpha to write when exporting LoRA adapters from sharded checkpoints.",
+    )
 
     merge_parser = subparsers.add_parser("merge", parents=[base_op_parser], help="Merge model checkpoints and save.")
     merge_parser.add_argument(
@@ -748,6 +762,7 @@ def main():
         "local_dir": args.local_dir,
         "hf_model_path": args.hf_model_path,
         "hf_model_config_path": args.local_dir,
+        "lora_alpha": args.lora_alpha,
     }
 
     if args.operation == "merge":

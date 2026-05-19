@@ -68,7 +68,8 @@ python3 -m verl.trainer.main_ppo \
 python3 -m verl.model_merger merge \
     --backend fsdp \
     --local_dir checkpoints/verl_grpo_example_gsm8k/${EXP_NAME}/global_step_1/actor/ \
-    --target_dir checkpoints/verl_grpo_example_gsm8k/${EXP_NAME}/global_step_1/actor/hf
+    --target_dir checkpoints/verl_grpo_example_gsm8k/${EXP_NAME}/global_step_1/actor/hf \
+    --lora-alpha 32
 
 # step 3. assert
 # make sure adapter_model.safetensors exists and its size is larger than 1MB

@@ -351,7 +351,7 @@ class FSDPSFTTrainer:
         else:
             raise ValueError(f"Unknown lr scheduler: {self.config.optim.lr_scheduler}")
 
-    def _compute_loss_and_backward(self, batch, do_backward=True):
+    def _compute_loss_and_backward(self, batch, do_backward=True, loss_scale=1.0):
         """Compute loss with optional sequence parallelism and remove padding features"""
         use_sp = self.use_remove_padding and self.config.ulysses_sequence_parallel_size > 1
 
@@ -447,7 +447,7 @@ class FSDPSFTTrainer:
             loss = torch.sum(loss) / (valid_token_this_rank + 1e-8) * dp_size
 
             if do_backward:
-                loss.backward()
+                (loss * loss_scale).backward()
             return loss
 
     def training_step(self, batch: TensorDict):
@@ -463,8 +463,8 @@ class FSDPSFTTrainer:
         n_micro_batches = len(micro_batches)
         step_loss = 0
         for micro_batch in micro_batches:
-            loss = self._compute_loss_and_backward(batch=micro_batch) / n_micro_batches
-            step_loss += loss.item()
+            loss = self._compute_loss_and_backward(batch=micro_batch, loss_scale=1.0 / n_micro_batches)
+            step_loss += loss.item() / n_micro_batches
 
         if self.config.model.strategy == "fsdp":
             grad_norm = self.fsdp_model.clip_grad_norm_(max_norm=self.config.optim.clip_grad)

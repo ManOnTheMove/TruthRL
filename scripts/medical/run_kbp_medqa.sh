@@ -3,6 +3,22 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
+DRY_RUN="${DRY_RUN:-0}"
+PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-0}"
+
+is_truthy() {
+  case "${1:-0}" in
+    1|true|TRUE|yes|YES|y|Y) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+print_command() {
+  printf "[DRY-RUN] Command:"
+  printf " %q" "$@"
+  printf "\n"
+}
+
 INPUT_PARQUET="${INPUT_PARQUET:-${REPO_ROOT}/data/medical/verl/medqa_grpo_train.parquet}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-${REPO_ROOT}/data/medical/kbp}"
 RUN_ID="${RUN_ID:-kbp_20260301_stagec-c8-8b_medqa_grpo_train}"
@@ -47,7 +63,9 @@ if [[ ! -f "${MODEL_PATH}/config.json" ]]; then
   exit 1
 fi
 
-mkdir -p "${OUTPUT_ROOT}"
+if ! is_truthy "${DRY_RUN}" && ! is_truthy "${PREFLIGHT_ONLY}"; then
+  mkdir -p "${OUTPUT_ROOT}"
+fi
 
 if [[ "${USE_APPTAINER}" == "1" ]]; then
   if [[ -n "${APPTAINER_IMAGE:-}" ]]; then
@@ -58,30 +76,36 @@ if [[ "${USE_APPTAINER}" == "1" ]]; then
     IMAGE_PATH="$(cd "${REPO_ROOT}/.." && pwd)/envs/truthrl_apptainer/truthrl.sif"
   fi
 
-  if ! command -v apptainer >/dev/null 2>&1; then
-    if command -v module >/dev/null 2>&1; then
-      module load apptainer >/dev/null 2>&1 || true
+  if ! is_truthy "${DRY_RUN}" && ! is_truthy "${PREFLIGHT_ONLY}"; then
+    if ! command -v apptainer >/dev/null 2>&1; then
+      if command -v module >/dev/null 2>&1; then
+        module load apptainer >/dev/null 2>&1 || true
+      fi
     fi
-  fi
-  if ! command -v apptainer >/dev/null 2>&1; then
-    echo "[ERROR] apptainer not found" >&2
-    exit 1
-  fi
-  if [[ ! -f "${IMAGE_PATH}" ]]; then
-    echo "[ERROR] Apptainer image not found: ${IMAGE_PATH}" >&2
-    exit 1
+    if ! command -v apptainer >/dev/null 2>&1; then
+      echo "[ERROR] apptainer not found" >&2
+      exit 1
+    fi
+    if [[ ! -f "${IMAGE_PATH}" ]]; then
+      echo "[ERROR] Apptainer image not found: ${IMAGE_PATH}" >&2
+      exit 1
+    fi
   fi
 
   NODE_TMPDIR="${SLURM_TMPDIR:-/tmp}"
-  mkdir -p "${NODE_TMPDIR}" >/dev/null 2>&1 || true
   export APPTAINER_CACHEDIR="${APPTAINER_CACHEDIR:-${NODE_TMPDIR}/apptainer_cache_${USER}}"
   export APPTAINER_TMPDIR="${APPTAINER_TMPDIR:-${NODE_TMPDIR}/apptainer_tmp_${USER}}"
-  mkdir -p "${APPTAINER_CACHEDIR}" "${APPTAINER_TMPDIR}"
+  if ! is_truthy "${DRY_RUN}" && ! is_truthy "${PREFLIGHT_ONLY}"; then
+    mkdir -p "${NODE_TMPDIR}" >/dev/null 2>&1 || true
+    mkdir -p "${APPTAINER_CACHEDIR}" "${APPTAINER_TMPDIR}"
+  fi
 
   SCRATCH_ROOT="${SCRATCH_ROOT:-/scratch/${USER}}"
   CACHE_ROOT="${CACHE_ROOT:-${SCRATCH_ROOT}/.cache}"
   CONFIG_ROOT="${CONFIG_ROOT:-${SCRATCH_ROOT}/.config}"
-  mkdir -p "${CACHE_ROOT}/huggingface/modules" "${CACHE_ROOT}/flashinfer" "${CONFIG_ROOT}/vllm"
+  if ! is_truthy "${DRY_RUN}" && ! is_truthy "${PREFLIGHT_ONLY}"; then
+    mkdir -p "${CACHE_ROOT}/huggingface/modules" "${CACHE_ROOT}/flashinfer" "${CONFIG_ROOT}/vllm"
+  fi
 
   export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-${CONFIG_ROOT}}"
   export HF_HOME="${HF_HOME:-${CACHE_ROOT}/huggingface}"
@@ -137,7 +161,7 @@ echo "[INFO] OUTPUT_ROOT=${OUTPUT_ROOT}"
 echo "[INFO] SAMPLING: probes=${PROBES_PER_QUESTION} n_chunk=${N_CHUNK} temp=${TEMPERATURE} top_p=${TOP_P} top_k=${TOP_K} min_p=${MIN_P} max_new_tokens=${MAX_NEW_TOKENS}"
 echo "[INFO] RUNTIME: workers=${NUM_WORKERS} gpu_ids=${GPU_IDS} gpu_mem_util=${GPU_MEMORY_UTILIZATION} max_num_seqs=${MAX_NUM_SEQS} max_num_batched_tokens=${MAX_NUM_BATCHED_TOKENS} max_model_len=${MAX_MODEL_LEN}"
 
-"${PY_CMD[@]}" "${REPO_ROOT}/scripts/medical/kbp_medqa_collect.py" \
+KBP_CMD=("${PY_CMD[@]}" "${REPO_ROOT}/scripts/medical/kbp_medqa_collect.py" \
   --input_parquet "${INPUT_PARQUET}" \
   --output_root "${OUTPUT_ROOT}" \
   --run_id "${RUN_ID}" \
@@ -165,6 +189,14 @@ echo "[INFO] RUNTIME: workers=${NUM_WORKERS} gpu_ids=${GPU_IDS} gpu_mem_util=${G
   --part_rows "${PART_ROWS}" \
   "${RESUME_FLAG[@]}" \
   "${POSTPROCESS_FLAG[@]}" \
-  "$@"
+  "$@")
+
+if is_truthy "${DRY_RUN}" || is_truthy "${PREFLIGHT_ONLY}"; then
+  print_command "${KBP_CMD[@]}"
+  echo "[DRY-RUN] Stage D2.5 KBP command was not executed."
+  exit 0
+fi
+
+"${KBP_CMD[@]}"
 
 echo "[PASS] Stage D2.5 KBP run completed."

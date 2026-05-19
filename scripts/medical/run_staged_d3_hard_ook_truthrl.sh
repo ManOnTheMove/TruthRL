@@ -3,6 +3,22 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
+DRY_RUN="${DRY_RUN:-0}"
+PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-0}"
+
+is_truthy() {
+  case "${1:-0}" in
+    1|true|TRUE|yes|YES|y|Y) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+print_command() {
+  printf "[DRY-RUN] Command:"
+  printf " %q" "$@"
+  printf "\n"
+}
+
 MODEL_PATH="${MODEL_PATH:-${REPO_ROOT}/../models/stagec_c8_8b_len10240_ep15_4gpu_step17175/merged_model}"
 TRAIN_PARQUET="${TRAIN_PARQUET:-${REPO_ROOT}/data/medical/verl/medqa_grpo_train_with_ook_d26.parquet}"
 VAL_PARQUET="${VAL_PARQUET:-${REPO_ROOT}/data/medical/verl/medqa_grpo_test.parquet}"
@@ -40,11 +56,15 @@ K="${K:-1}"
 PROJECT_NAME="${PROJECT_NAME:-stage-d-d3}"
 EXPERIMENT_NAME="${EXPERIMENT_NAME:-truthrl-hard-ook-d3}"
 
-mkdir -p "${OUTPUT_DIR}" "${LOG_DIR}" "${HYDRA_RUN_DIR}" "${RAY_TMPDIR}" "${LOCAL_TMP_ROOT}"
+if ! is_truthy "${DRY_RUN}" && ! is_truthy "${PREFLIGHT_ONLY}"; then
+  mkdir -p "${OUTPUT_DIR}" "${LOG_DIR}" "${HYDRA_RUN_DIR}" "${RAY_TMPDIR}" "${LOCAL_TMP_ROOT}"
+fi
 export HYDRA_FULL_ERROR="${HYDRA_FULL_ERROR:-1}"
 export RAY_TMPDIR
 export TMPDIR="${D3_TMPDIR:-${LOCAL_TMP_ROOT}/tmp}"
-mkdir -p "${TMPDIR}"
+if ! is_truthy "${DRY_RUN}" && ! is_truthy "${PREFLIGHT_ONLY}"; then
+  mkdir -p "${TMPDIR}"
+fi
 
 if [[ ! -f "${MODEL_PATH}/config.json" ]]; then
   echo "[ERROR] MODEL_PATH invalid: ${MODEL_PATH}" >&2
@@ -68,30 +88,36 @@ if [[ "${USE_APPTAINER}" == "1" ]]; then
     IMAGE_PATH="$(cd "${REPO_ROOT}/.." && pwd)/envs/truthrl_apptainer/truthrl.sif"
   fi
 
-  if ! command -v apptainer >/dev/null 2>&1; then
-    if command -v module >/dev/null 2>&1; then
-      module load apptainer >/dev/null 2>&1 || true
+  if ! is_truthy "${DRY_RUN}" && ! is_truthy "${PREFLIGHT_ONLY}"; then
+    if ! command -v apptainer >/dev/null 2>&1; then
+      if command -v module >/dev/null 2>&1; then
+        module load apptainer >/dev/null 2>&1 || true
+      fi
     fi
-  fi
-  if ! command -v apptainer >/dev/null 2>&1; then
-    echo "[ERROR] apptainer not found" >&2
-    exit 1
-  fi
-  if [[ ! -f "${IMAGE_PATH}" ]]; then
-    echo "[ERROR] Apptainer image not found: ${IMAGE_PATH}" >&2
-    exit 1
+    if ! command -v apptainer >/dev/null 2>&1; then
+      echo "[ERROR] apptainer not found" >&2
+      exit 1
+    fi
+    if [[ ! -f "${IMAGE_PATH}" ]]; then
+      echo "[ERROR] Apptainer image not found: ${IMAGE_PATH}" >&2
+      exit 1
+    fi
   fi
 
   NODE_TMPDIR="${SLURM_TMPDIR:-/tmp}"
-  mkdir -p "${NODE_TMPDIR}" >/dev/null 2>&1 || true
   export APPTAINER_CACHEDIR="${APPTAINER_CACHEDIR:-${NODE_TMPDIR}/apptainer_cache_${USER}}"
   export APPTAINER_TMPDIR="${APPTAINER_TMPDIR:-${NODE_TMPDIR}/apptainer_tmp_${USER}}"
-  mkdir -p "${APPTAINER_CACHEDIR}" "${APPTAINER_TMPDIR}"
+  if ! is_truthy "${DRY_RUN}" && ! is_truthy "${PREFLIGHT_ONLY}"; then
+    mkdir -p "${NODE_TMPDIR}" >/dev/null 2>&1 || true
+    mkdir -p "${APPTAINER_CACHEDIR}" "${APPTAINER_TMPDIR}"
+  fi
 
   SCRATCH_ROOT="${SCRATCH_ROOT:-/scratch/${USER}}"
   CACHE_ROOT="${CACHE_ROOT:-${SCRATCH_ROOT}/.cache}"
   CONFIG_ROOT="${CONFIG_ROOT:-${SCRATCH_ROOT}/.config}"
-  mkdir -p "${CACHE_ROOT}/huggingface/modules" "${CACHE_ROOT}/flashinfer" "${CONFIG_ROOT}/vllm"
+  if ! is_truthy "${DRY_RUN}" && ! is_truthy "${PREFLIGHT_ONLY}"; then
+    mkdir -p "${CACHE_ROOT}/huggingface/modules" "${CACHE_ROOT}/flashinfer" "${CONFIG_ROOT}/vllm"
+  fi
 
   export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-${CONFIG_ROOT}}"
   export XDG_CACHE_HOME="${XDG_CACHE_HOME:-${CACHE_ROOT}}"
@@ -101,7 +127,9 @@ if [[ "${USE_APPTAINER}" == "1" ]]; then
   export CUDA_CACHE_PATH="${CUDA_CACHE_PATH:-${CACHE_ROOT}/cuda}"
   export TORCHINDUCTOR_CACHE_DIR="${TORCHINDUCTOR_CACHE_DIR:-${CACHE_ROOT}/torchinductor}"
   export FLASHINFER_CACHE_DIR="${FLASHINFER_CACHE_DIR:-${CACHE_ROOT}/flashinfer}"
-  mkdir -p "${TRITON_CACHE_DIR}" "${CUDA_CACHE_PATH}" "${TORCHINDUCTOR_CACHE_DIR}" "${FLASHINFER_CACHE_DIR}"
+  if ! is_truthy "${DRY_RUN}" && ! is_truthy "${PREFLIGHT_ONLY}"; then
+    mkdir -p "${TRITON_CACHE_DIR}" "${CUDA_CACHE_PATH}" "${TORCHINDUCTOR_CACHE_DIR}" "${FLASHINFER_CACHE_DIR}"
+  fi
   if [[ -z "${APPTAINER_BINDPATH:-}" ]]; then
     export APPTAINER_BINDPATH="/project:/project,/home/${USER}:/home/${USER},/scratch:/scratch,${CACHE_ROOT}:/home/${USER}/.cache,${CONFIG_ROOT}:/home/${USER}/.config"
   fi
@@ -135,7 +163,7 @@ echo "[INFO] ROLLOUT_MAX_MODEL_LEN=${ROLLOUT_MAX_MODEL_LEN}"
 echo "[INFO] ROLLOUT_MAX_BATCHED_TOKENS=${ROLLOUT_MAX_BATCHED_TOKENS}"
 echo "[INFO] K=${K}"
 
-"${PY_CMD[@]}" -m verl.trainer.main_ppo \
+TRAIN_CMD=("${PY_CMD[@]}" -m verl.trainer.main_ppo \
   --config-name _generated_ppo_trainer \
   hydra.run.dir="${HYDRA_RUN_DIR}" \
   algorithm.adv_estimator=grpo \
@@ -188,6 +216,14 @@ echo "[INFO] K=${K}"
   trainer.nnodes="${NNODES}" \
   trainer.save_freq="${SAVE_FREQ}" \
   trainer.test_freq="${TEST_FREQ}" \
-  trainer.total_training_steps="${TOTAL_TRAINING_STEPS}" "$@"
+  trainer.total_training_steps="${TOTAL_TRAINING_STEPS}" "$@")
+
+if is_truthy "${DRY_RUN}" || is_truthy "${PREFLIGHT_ONLY}"; then
+  print_command "${TRAIN_CMD[@]}"
+  echo "[DRY-RUN] D3 hard-OOK command was not executed."
+  exit 0
+fi
+
+"${TRAIN_CMD[@]}"
 
 echo "[PASS] D3 hard-OOK run completed."

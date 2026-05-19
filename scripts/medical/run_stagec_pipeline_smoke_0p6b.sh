@@ -235,13 +235,15 @@ run_merge_smoke() {
       --base_model_path "${MODEL_PATH}" \
       --lora_model_path "${latest_ckpt}" \
       --merged_model_save_path "${MERGED_DIR}" \
-      --trust_remote_code
+      --trust_remote_code \
+      --expected-lora-alpha "${EXPECT_LORA_ALPHA}"
   else
     echo "[INFO] adapter_config.json not found. Fallback to verl.model_merger (fsdp backend)."
     "${PY_CMD[@]}" -m verl.model_merger merge \
       --backend fsdp \
       --local_dir "${latest_ckpt}" \
-      --target_dir "${MERGED_DIR}"
+      --target_dir "${MERGED_DIR}" \
+      --lora-alpha "${EXPECT_LORA_ALPHA}"
 
     local adapter_dir="${MERGED_DIR}/lora_adapter"
     local adapter_cfg="${adapter_dir}/adapter_config.json"
@@ -256,7 +258,8 @@ run_merge_smoke() {
       --base_model_path "${MODEL_PATH}" \
       --lora_model_path "${adapter_dir}" \
       --merged_model_save_path "${MERGED_DIR}" \
-      --trust_remote_code
+      --trust_remote_code \
+      --expected-lora-alpha "${EXPECT_LORA_ALPHA}"
   fi
 
   "${PY_CMD[@]}" - <<PY

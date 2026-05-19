@@ -75,14 +75,16 @@ if [[ -f "${C7_CKPT}/adapter_config.json" ]]; then
     --base_model_path "${MODEL_PATH}" \
     --lora_model_path "${C7_CKPT}" \
     --merged_model_save_path "${MERGED_DIR}" \
-    --trust_remote_code
+    --trust_remote_code \
+    --expected-lora-alpha "${EXPECT_LORA_ALPHA}"
 else
   MERGE_BACKEND="fsdp"
   echo "[INFO] adapter_config.json not found, fallback to verl.model_merger (fsdp backend)."
   "${PY_CMD[@]}" -m verl.model_merger merge \
     --backend fsdp \
     --local_dir "${C7_CKPT}" \
-    --target_dir "${MERGED_DIR}"
+    --target_dir "${MERGED_DIR}" \
+    --lora-alpha "${EXPECT_LORA_ALPHA}"
 
   ADAPTER_DIR="${MERGED_DIR}/lora_adapter"
   ADAPTER_CFG="${ADAPTER_DIR}/adapter_config.json"
@@ -101,7 +103,8 @@ else
     --base_model_path "${MODEL_PATH}" \
     --lora_model_path "${ADAPTER_DIR}" \
     --merged_model_save_path "${MERGED_DIR}" \
-    --trust_remote_code
+    --trust_remote_code \
+    --expected-lora-alpha "${EXPECT_LORA_ALPHA}"
   MERGE_BACKEND="fsdp+peft"
 fi
 
