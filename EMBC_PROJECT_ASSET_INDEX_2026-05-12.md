@@ -1,6 +1,6 @@
 # EMBC Project Asset Index
 
-Snapshot date: 2026-05-12
+Snapshot date: 2026-06-02
 
 This file records important non-code assets for the EMBC TruthRL/Clinical-R1 work. It is a path index only. Do not commit model weights, checkpoints, Apptainer images, generated parquet files, logs, or cache directories to GitHub.
 
@@ -10,8 +10,23 @@ The primary code repositories are backed up as follows.
 
 | Repository | Local path | Remote | Branch / commit | Status |
 | --- | --- | --- | --- | --- |
-| TruthRL | `/home/erichyu/links/projects/def-zshakeri/erichyu/embc/TruthRL` | `https://github.com/ManOnTheMove/TruthRL.git` | `embc_clinical_truthrl_v1` at `40fa386` | Backed up |
-| CPRO | `/home/erichyu/links/projects/def-zshakeri/erichyu/embc/CPRO` | `https://github.com/ManOnTheMove/CPRO.git` | `main` at `a087583` | Backed up |
+| TruthRL | `/home/erichyu/links/projects/def-zshakeri/erichyu/embc/TruthRL` | `https://github.com/ManOnTheMove/TruthRL.git` | `embc_clinical_truthrl_v1`; Phase C replay-tool commit is local after parser baseline `e0344cb` | Phase C local commit, push pending |
+| CPRO | `/home/erichyu/links/projects/def-zshakeri/erichyu/embc/CPRO` | `https://github.com/ManOnTheMove/CPRO.git` | `main` at `34501a4` | Backed up |
+
+Important recent TruthRL commits:
+
+```text
+e0344cb refactor(medical): centralize answer parsing policies
+71fa2ff refactor(medical): add preflight guardrails and fix P0 training merge issues
+d6805b2 Document EMBC project asset paths
+40fa386 Save medical TruthRL scripts
+```
+
+Important recent CPRO commit:
+
+```text
+34501a4 fix: correct medical preprocessing splits and SFT accumulation scaling
+```
 
 Important code now covered by the TruthRL backup includes:
 
@@ -21,7 +36,14 @@ Important code now covered by the TruthRL backup includes:
 | KBP collection and merge scripts | `TruthRL/scripts/medical/kbp_medqa_collect.py`, `TruthRL/scripts/medical/kbp_merge_shards.py`, `TruthRL/scripts/medical/run_kbp_medqa.sh`, `TruthRL/scripts/medical/run_kbp_merge_and_postprocess.sh`, `TruthRL/scripts/medical/submit_kbp_medqa_*.slurm` |
 | GRPO / Stage D scripts | `TruthRL/scripts/medical/run_staged_d1_grpo_truthrl.sh`, `TruthRL/scripts/medical/run_staged_d2_grpo_truthrl_cpro.sh`, `TruthRL/scripts/medical/run_staged_d3_hard_ook_truthrl.sh`, `TruthRL/scripts/medical/submit_staged_d*.slurm` |
 | Stage D evaluation | `TruthRL/scripts/medical/stageD_eval_collect.py`, `TruthRL/scripts/medical/stageD_eval_compare.py`, `TruthRL/scripts/medical/stageD_d3_diagnose_ook_uptake.py` |
-| Medical reward and trainer changes | `TruthRL/training/verl/verl/utils/reward_score/clinical_medqa_reward.py`, `TruthRL/training/verl/verl/trainer/main_ppo.py`, `TruthRL/training/verl/verl/trainer/config/ppo_trainer.yaml` |
+| Medical reward, parser, and trainer changes | `TruthRL/training/verl/verl/utils/reward_score/clinical_medqa_reward.py`, `TruthRL/training/verl/verl/utils/reward_score/medical_answer_parser.py`, `TruthRL/training/verl/verl/trainer/main_ppo.py`, `TruthRL/training/verl/verl/trainer/config/ppo_trainer.yaml` |
+| Phase C parser replay tool | `TruthRL/scripts/medical/parser_replay_metric_compat.py` |
+
+Important tracked refactor reports:
+
+| Report | Purpose |
+| --- | --- |
+| `TruthRL/EMBC_PHASE_C_PARSER_REPLAY_2026-06-01.md` | Records the Phase C parser replay inputs, outputs, metric compatibility findings, and policy interpretation. |
 
 ## Important Model and Checkpoint Paths
 
@@ -94,6 +116,17 @@ If there is only one Stage D artifact to move off scratch, prioritize:
 | Full KBP pass | `/home/erichyu/links/projects/def-zshakeri/erichyu/embc/TruthRL/data/medical/kbp/runs/kbp_20260319_stagec-c8-8b_medqa_grpo_train_fullpass` | Full KBP pass for Stage C 8B. |
 | Earlier KBP pass | `/home/erichyu/links/projects/def-zshakeri/erichyu/embc/TruthRL/data/medical/kbp/runs/kbp_20260301_stagec-c8-8b_medqa_grpo_train` | Earlier KBP run used in D2.5/D2.6 analysis. |
 | Pilot KBP pass | `/home/erichyu/links/projects/def-zshakeri/erichyu/embc/TruthRL/data/medical/kbp/runs/kbp_20260301_stagec-c8-8b_medqa_grpo_train_pilot10` | Pilot run. Lower priority. |
+| Phase C parser replay output | `/home/erichyu/links/projects/def-zshakeri/erichyu/embc/TruthRL/data/medical/parser_replay/phaseC_parser_compat_full_20260601` | Lightweight generated compatibility report. Do not commit generated outputs under `data/`. |
+
+Phase C parser replay summary:
+
+```text
+StageD eval: unchanged for stagec_base and d3_global_step_300.
+KBP OOK labels: unchanged.
+KBP correct_count changed for 684 / 5089 questions.
+KBP difficulty bucket changed for 15 / 5089 questions.
+Main cause: historical multi_boxed rows become valid under final_answer_last_boxed.
+```
 
 ## Environment and Container Assets
 
@@ -111,6 +144,7 @@ These are not all inside Git repositories. They should be included in a lightwei
 | --- | --- |
 | Project instructions | `/home/erichyu/links/projects/def-zshakeri/erichyu/embc/AGENTS.md` |
 | Technical audit | `/home/erichyu/links/projects/def-zshakeri/erichyu/embc/technical_audit_report_2026-04-21.md` |
+| Phase C parser replay report | `/home/erichyu/links/projects/def-zshakeri/erichyu/embc/TruthRL/EMBC_PHASE_C_PARSER_REPLAY_2026-06-01.md` |
 | Papers | `/home/erichyu/links/projects/def-zshakeri/erichyu/embc/paper/TruthRL.md`, `/home/erichyu/links/projects/def-zshakeri/erichyu/embc/paper/CRPO.md` |
 | Integrated plans | `/home/erichyu/links/projects/def-zshakeri/erichyu/embc/chat_with_llm/plan/final_integrated_plan.md`, `/home/erichyu/links/projects/def-zshakeri/erichyu/embc/chat_with_llm/plan/truthrl_clinicalr1_integration_plan.md` |
 | Stage C plans and reports | `/home/erichyu/links/projects/def-zshakeri/erichyu/embc/chat_with_llm/plan/StageC/stageC_implementation_plan_2026-02-15.md`, `/home/erichyu/links/projects/def-zshakeri/erichyu/embc/chat_with_llm/reports/stagec_cold_start_sft_explainer_2026-02-26.md`, `/home/erichyu/links/projects/def-zshakeri/erichyu/embc/chat_with_llm/stage_reports/stage_c/stageC_to_stageD_handover_report_2026-02-24.md` |
@@ -141,4 +175,4 @@ The top-level `KBP_results` directory is not part of the `TruthRL` or `CPRO` Git
 2. Create a separate lightweight supporting-materials backup for `KBP_results`, `paper`, `chat_with_llm`, `org_codebase/TruthRL-main`, `AGENTS.md`, `technical_audit_report_2026-04-21.md`, and `envs/truthrl_apptainer/truthrl.def`.
 3. Do not include these patterns in any GitHub repo: `*.sif`, `*.pt`, `*.pth`, `*.ckpt`, `*.bin`, `*.safetensors`, `*.parquet`, `*.npy`, `*.npz`, `*.out`, `*.err`, `data/`, `checkpoints/`, `outputs/`, `logs/`, `runs/`, `wandb/`.
 4. Treat `/scratch/erichyu/stageD_d3_hard_ook` as high risk for data loss. If the Stage D D3 model matters, copy the HF export and final checkpoint to durable project storage or an external artifact store.
-5. For long-term model preservation, record both the model path and the exact code commit used to produce/evaluate it. For the current code state, use TruthRL commit `40fa386`.
+5. For long-term model preservation, record both the model path and the exact code commit used to produce/evaluate it. For Phase C replay interpretation, use TruthRL commit `e0344cb` as the parser-refactor baseline and the subsequent Phase C replay-tool commit for the analysis script/report.
