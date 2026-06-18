@@ -45,7 +45,7 @@ BUCKET_ORDER = ["0", "1-63", "64-127", "128-191", "192-255", "256", "other"]
 
 def parse_args() -> argparse.Namespace:
     repo_root = Path(__file__).resolve().parents[2]
-    parser = argparse.ArgumentParser(description="Replay Phase-C parser metric compatibility.")
+    parser = argparse.ArgumentParser(description="Replay parser metric compatibility.")
     parser.add_argument("--repo-root", type=Path, default=repo_root)
     parser.add_argument("--kbp-run-dir", type=Path, default=None)
     parser.add_argument("--kbp-split", type=str, default="")
@@ -1080,7 +1080,7 @@ def write_summary_md(
     stageD_summary: dict[str, Any] | None,
 ) -> str:
     lines = [
-        "# Phase C Parser Replay Compatibility",
+        "# Parser Replay Metric Compatibility",
         "",
         "This report is an offline parser/metric replay. It did not train models, generate responses, or modify historical outputs.",
         "",
@@ -1148,21 +1148,43 @@ def main() -> None:
     parse_status_path = write_combined_parse_status(out_dir, kbp_summary)
     legacy_probe_path = write_legacy_first_boxed_probe(parser_module, out_dir)
 
+    code_commit = git_head(args.repo_root)
+    parser_policies = {
+        "kbp_new": POLICY_KBP_NEW,
+        "stageD_new": POLICY_STAGE_D_NEW,
+        "legacy_probe_new": POLICY_LEGACY_FIRST,
+    }
+    input_paths: dict[str, Any] = {}
+    if kbp_summary:
+        input_paths.update(
+            {
+                "kbp_run_dir": kbp_summary.get("run_dir", ""),
+                "kbp_input_parquet": kbp_summary.get("input_parquet", ""),
+            }
+        )
+    if stageD_summary:
+        input_paths["stageD_eval_root"] = stageD_summary.get("eval_root", "")
+        input_paths["stageD_prediction_parquets"] = {
+            model_id: payload.get("predictions_parquet", "")
+            for model_id, payload in stageD_summary.get("models", {}).items()
+        }
+
     metadata = {
         "generated_at_utc": utc_now(),
         "repo_root": str(args.repo_root),
-        "truthrl_commit": git_head(args.repo_root),
+        "truthrl_commit": code_commit,
+        "code_commit": code_commit,
         "smoke_mode": bool(smoke_mode),
         "max_kbp_responses": int(args.max_kbp_responses),
         "max_stageD_rows": int(args.max_stageD_rows),
+        "output_dir": str(out_dir),
+        "input_paths": input_paths,
         "parser_module": str(
             args.repo_root / "training" / "verl" / "verl" / "utils" / "reward_score" / "medical_answer_parser.py"
         ),
-        "policies": {
-            "kbp_new": POLICY_KBP_NEW,
-            "stageD_new": POLICY_STAGE_D_NEW,
-            "legacy_probe_new": POLICY_LEGACY_FIRST,
-        },
+        "parser_policy": parser_policies,
+        "parser_policies": parser_policies,
+        "policies": parser_policies,
         "outputs": {
             "parse_status_compare_csv": parse_status_path,
             "legacy_first_boxed_probe_csv": legacy_probe_path,
@@ -1185,7 +1207,7 @@ def main() -> None:
     metadata_path = out_dir / "metadata.json"
     write_json(metadata_path, metadata)
 
-    print(f"[PASS] wrote Phase C parser replay outputs under: {out_dir}")
+    print(f"[PASS] wrote parser replay outputs under: {out_dir}")
     print(f"[INFO] summary={summary_path}")
     print(f"[INFO] metadata={metadata_path}")
 
